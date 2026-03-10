@@ -3,6 +3,7 @@ const Worker = require('web-worker');
 
 const dispatch = require('../../src/dispatch/central-dispatch');
 const path = require('path');
+const {pathToFileURL} = require('url');
 const test = require('tap').test;
 
 
@@ -50,7 +51,7 @@ test('local', t => {
 test('remote', t => {
     const fixturesDir = path.resolve(__dirname, '../fixtures');
     const shimPath = path.resolve(fixturesDir, 'dispatch-test-worker-shim.js');
-    const worker = new Worker(shimPath, null, {cwd: fixturesDir});
+    const worker = new Worker(pathToFileURL(shimPath).toString(), {type: 'module'});
     dispatch.addWorker(worker);
 
     const waitForWorker = new Promise(resolve => {

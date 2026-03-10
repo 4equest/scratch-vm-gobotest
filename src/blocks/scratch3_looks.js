@@ -150,6 +150,14 @@ class Scratch3LooksBlocks {
         clearTimeout(this._bubbleTimeout);
     }
 
+    _emitGobotestLooksEvent (eventName, payload) {
+        if (!this.runtime || typeof this.runtime.emit !== 'function') return;
+        const shouldEmit = typeof this.runtime.listenerCount !== 'function' ||
+            this.runtime.listenerCount(eventName) > 0;
+        if (!shouldEmit) return;
+        this.runtime.emit(eventName, payload);
+    }
+
     /**
      * Position the bubble of a target. If it doesn't fit on the specified side, flip and rerender.
      * @param {!Target} target Target whose bubble needs positioning.
@@ -333,19 +341,25 @@ class Scratch3LooksBlocks {
     }
 
     sayforsecs (args, util) {
-        this.say(args, util);
         const target = util.target;
-        const usageId = this._getBubbleState(target).usageId;
-        return new Promise(resolve => {
-            this._bubbleTimeout = setTimeout(() => {
-                this._bubbleTimeout = null;
-                // Clear say bubble if it hasn't been changed and proceed.
-                if (this._getBubbleState(target).usageId === usageId) {
-                    this._updateBubble(target, 'say', '');
-                }
-                resolve();
-            }, 1000 * args.SECS);
-        });
+        if (util.stackTimerNeedsInit()) {
+            this.say(args, util);
+            let duration = 1000 * Cast.toNumber(args.SECS);
+            if (!isFinite(duration)) duration = 0;
+            duration = Math.max(0, duration);
+            util.startStackTimer(duration);
+            util.stackFrame.bubbleUsageId = this._getBubbleState(target).usageId;
+            util.yield();
+            return;
+        }
+        if (!util.stackTimerFinished()) {
+            util.yield();
+            return;
+        }
+        // Clear say bubble if it hasn't been changed and proceed.
+        if (this._getBubbleState(target).usageId === util.stackFrame.bubbleUsageId) {
+            this._updateBubble(target, 'say', '');
+        }
     }
 
     think (args, util) {
@@ -353,29 +367,51 @@ class Scratch3LooksBlocks {
     }
 
     thinkforsecs (args, util) {
-        this.think(args, util);
         const target = util.target;
-        const usageId = this._getBubbleState(target).usageId;
-        return new Promise(resolve => {
-            this._bubbleTimeout = setTimeout(() => {
-                this._bubbleTimeout = null;
-                // Clear think bubble if it hasn't been changed and proceed.
-                if (this._getBubbleState(target).usageId === usageId) {
-                    this._updateBubble(target, 'think', '');
-                }
-                resolve();
-            }, 1000 * args.SECS);
-        });
+        if (util.stackTimerNeedsInit()) {
+            this.think(args, util);
+            let duration = 1000 * Cast.toNumber(args.SECS);
+            if (!isFinite(duration)) duration = 0;
+            duration = Math.max(0, duration);
+            util.startStackTimer(duration);
+            util.stackFrame.bubbleUsageId = this._getBubbleState(target).usageId;
+            util.yield();
+            return;
+        }
+        if (!util.stackTimerFinished()) {
+            util.yield();
+            return;
+        }
+        // Clear think bubble if it hasn't been changed and proceed.
+        if (this._getBubbleState(target).usageId === util.stackFrame.bubbleUsageId) {
+            this._updateBubble(target, 'think', '');
+        }
     }
 
     show (args, util) {
+        const beforeVisible = Boolean(util.target && util.target.visible);
         util.target.setVisible(true);
         this._renderBubble(util.target);
+        if (Boolean(util.target && util.target.visible) !== beforeVisible) {
+            this._emitGobotestLooksEvent('GOBOTEST_LOOKS_VISIBILITY_CHANGE', {
+                targetId: util.target && util.target.id ? util.target.id : '',
+                targetName: util.target && typeof util.target.getName === 'function' ? util.target.getName() : '',
+                visible: true
+            });
+        }
     }
 
     hide (args, util) {
+        const beforeVisible = Boolean(util.target && util.target.visible);
         util.target.setVisible(false);
         this._renderBubble(util.target);
+        if (Boolean(util.target && util.target.visible) !== beforeVisible) {
+            this._emitGobotestLooksEvent('GOBOTEST_LOOKS_VISIBILITY_CHANGE', {
+                targetId: util.target && util.target.id ? util.target.id : '',
+                targetName: util.target && typeof util.target.getName === 'function' ? util.target.getName() : '',
+                visible: false
+            });
+        }
     }
 
     /**
@@ -387,6 +423,7 @@ class Scratch3LooksBlocks {
      * @return {Array.<!Thread>} Any threads started by this switch.
      */
     _setCostume (target, requestedCostume, optZeroIndex) {
+        const beforeIndex = target.currentCostume;
         if (typeof requestedCostume === 'number') {
             // Numbers should be treated as costume indices, always
             target.setCostume(optZeroIndex ? requestedCostume : requestedCostume - 1);
@@ -408,6 +445,17 @@ class Scratch3LooksBlocks {
             }
         }
 
+        if (target.currentCostume !== beforeIndex) {
+            const costumes = typeof target.getCostumes === 'function' ? target.getCostumes() : [];
+            const costume = Array.isArray(costumes) ? costumes[target.currentCostume] : null;
+            this._emitGobotestLooksEvent('GOBOTEST_LOOKS_COSTUME_CHANGE', {
+                targetId: target && target.id ? target.id : '',
+                targetName: target && typeof target.getName === 'function' ? target.getName() : '',
+                costumeIndex: target.currentCostume,
+                costumeName: costume && costume.name ? costume.name : ''
+            });
+        }
+
         // Per 2.0, 'switch costume' can't start threads even in the Stage.
         return [];
     }
@@ -421,6 +469,7 @@ class Scratch3LooksBlocks {
      * @return {Array.<!Thread>} Any threads started by this switch.
      */
     _setBackdrop (stage, requestedBackdrop, optZeroIndex) {
+        const beforeIndex = stage.currentCostume;
         if (typeof requestedBackdrop === 'number') {
             // Numbers should be treated as backdrop indices, always
             stage.setCostume(optZeroIndex ? requestedBackdrop : requestedBackdrop - 1);
@@ -456,6 +505,14 @@ class Scratch3LooksBlocks {
         }
 
         const newName = stage.getCostumes()[stage.currentCostume].name;
+        if (stage.currentCostume !== beforeIndex) {
+            this._emitGobotestLooksEvent('GOBOTEST_LOOKS_BACKDROP_CHANGE', {
+                targetId: stage && stage.id ? stage.id : '',
+                targetName: stage && typeof stage.getName === 'function' ? stage.getName() : '',
+                backdropIndex: stage.currentCostume,
+                backdropName: newName
+            });
+        }
         return this.runtime.startHats('event_whenbackdropswitchesto', {
             BACKDROP: newName
         });
@@ -544,17 +601,39 @@ class Scratch3LooksBlocks {
         let newValue = change + util.target.effects[effect];
         newValue = this.clampEffect(effect, newValue);
         util.target.setEffect(effect, newValue);
+        this._emitGobotestLooksEvent('GOBOTEST_LOOKS_EFFECT_CHANGE', {
+            targetId: util.target && util.target.id ? util.target.id : '',
+            targetName: util.target && typeof util.target.getName === 'function' ? util.target.getName() : '',
+            effect,
+            value: newValue,
+            mode: 'change'
+        });
     }
 
     setEffect (args, util) {
         const effect = Cast.toString(args.EFFECT).toLowerCase();
+        if (!Object.prototype.hasOwnProperty.call(util.target.effects, effect)) return;
         let value = Cast.toNumber(args.VALUE);
         value = this.clampEffect(effect, value);
         util.target.setEffect(effect, value);
+        this._emitGobotestLooksEvent('GOBOTEST_LOOKS_EFFECT_CHANGE', {
+            targetId: util.target && util.target.id ? util.target.id : '',
+            targetName: util.target && typeof util.target.getName === 'function' ? util.target.getName() : '',
+            effect,
+            value,
+            mode: 'set'
+        });
     }
 
     clearEffects (args, util) {
         util.target.clearEffects();
+        this._emitGobotestLooksEvent('GOBOTEST_LOOKS_EFFECT_CHANGE', {
+            targetId: util.target && util.target.id ? util.target.id : '',
+            targetName: util.target && typeof util.target.getName === 'function' ? util.target.getName() : '',
+            effect: '*',
+            value: 0,
+            mode: 'clear'
+        });
     }
 
     changeSize (args, util) {

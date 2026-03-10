@@ -319,6 +319,21 @@ class Runtime extends EventEmitter {
          */
         this.currentStepTime = null;
 
+        /**
+         * When true, skip UI-only work (monitors/target updates/run status) for headless runners.
+         * Defaults to false to preserve upstream Scratch VM behavior.
+         * @type {boolean}
+         */
+        this.headless = false;
+
+        /**
+         * When true, advance currentMSecs deterministically by currentStepTime on each step.
+         * Defaults to false to preserve upstream Scratch VM behavior.
+         * @type {boolean}
+         * @private
+         */
+        this._useVirtualTime = false;
+
         // Set an intial value for this.currentMSecs
         this.updateCurrentMSecs();
 
@@ -2303,7 +2318,9 @@ class Runtime extends EventEmitter {
             }
         }
         this.redrawRequested = false;
-        this._pushMonitors();
+        if (!this.headless) {
+            this._pushMonitors();
+        }
         if (this.profiler !== null) {
             if (stepThreadsProfilerId === -1) {
                 stepThreadsProfilerId = this.profiler.idByName(
@@ -2316,14 +2333,16 @@ class Runtime extends EventEmitter {
         if (this.profiler !== null) {
             this.profiler.stop();
         }
-        this._updateGlows(doneThreads);
-        // Add done threads so that even if a thread finishes within 1 frame, the green
-        // flag will still indicate that a script ran.
-        this._emitProjectRunStatus(
-            this.threads.length +
-                doneThreads.length -
-                this._getMonitorThreadCount([...this.threads, ...doneThreads])
-        );
+        if (!this.headless) {
+            this._updateGlows(doneThreads);
+            // Add done threads so that even if a thread finishes within 1 frame, the green
+            // flag will still indicate that a script ran.
+            this._emitProjectRunStatus(
+                this.threads.length +
+                    doneThreads.length -
+                    this._getMonitorThreadCount([...this.threads, ...doneThreads])
+            );
+        }
         // Store threads that completed this iteration for testing and other
         // internal purposes.
         this._lastStepDoneThreads = doneThreads;
@@ -2342,17 +2361,19 @@ class Runtime extends EventEmitter {
             }
         }
 
-        if (this._refreshTargets) {
-            this.emit(
-                Runtime.TARGETS_UPDATE,
-                false /* Don't emit project changed */
-            );
-            this._refreshTargets = false;
-        }
+        if (!this.headless) {
+            if (this._refreshTargets) {
+                this.emit(
+                    Runtime.TARGETS_UPDATE,
+                    false /* Don't emit project changed */
+                );
+                this._refreshTargets = false;
+            }
 
-        if (!this._prevMonitorState.equals(this._monitorState)) {
-            this.emit(Runtime.MONITORS_UPDATE, this._monitorState);
-            this._prevMonitorState = this._monitorState;
+            if (!this._prevMonitorState.equals(this._monitorState)) {
+                this.emit(Runtime.MONITORS_UPDATE, this._monitorState);
+                this._prevMonitorState = this._monitorState;
+            }
         }
 
         if (this.profiler !== null) {
@@ -2887,12 +2908,33 @@ class Runtime extends EventEmitter {
     }
 
     /**
+     * Enable/disable virtual time for headless execution.
+     * When enabled, {@link updateCurrentMSecs} advances `currentMSecs` by `currentStepTime`.
+     * @param {boolean} enabled Whether to use virtual time.
+     * @param {number} [startMSecs=0] Starting time in milliseconds when enabling virtual time.
+     */
+    setVirtualTime (enabled, startMSecs = 0) {
+        this._useVirtualTime = Boolean(enabled);
+        if (this._useVirtualTime) {
+            this.currentMSecs = startMSecs;
+        } else {
+            this.currentMSecs = Date.now();
+        }
+    }
+
+    /**
      * Update a millisecond timestamp value that is saved on the Runtime.
      * This value is helpful in certain instances for compatibility with Scratch 2,
-     * which sometimes uses a `currentMSecs` timestamp value in Interpreter.as
+     * which sometimes uses a `currentMSecs` timestamp value in Interpreter.as.
+     * When virtual time is enabled, this uses `currentStepTime` instead of wall-clock time.
      */
     updateCurrentMSecs () {
-        this.currentMSecs = Date.now();
+        if (this._useVirtualTime) {
+            const dt = (typeof this.currentStepTime === 'number') ? this.currentStepTime : 0;
+            this.currentMSecs += dt;
+        } else {
+            this.currentMSecs = Date.now();
+        }
     }
 }
 

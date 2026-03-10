@@ -16,6 +16,15 @@ const util = {
                 {name: 'third name'}
             ]
         },
+        effects: {
+            brightness: 0,
+            ghost: 0,
+            color: 0,
+            fisheye: 0,
+            whirl: 0,
+            pixelate: 0,
+            mosaic: 0
+        },
         _customState: {},
         getCustomState: () => util.target._customState
     }
@@ -228,6 +237,78 @@ test('numbers should be rounded properly in say/think', t => {
     looks.say({MESSAGE: '1.99999'}, util, 'say bubble should not round strings');
     looks.think({MESSAGE: '1.99999'}, util, 'think bubble should not round strings');
 
+    t.end();
+});
+
+test('sayforsecs/thinkforsecs clamp non-finite durations', t => {
+    const rt = new Runtime();
+    const looks = new Looks(rt);
+    let duration = -1;
+    const makeUtil = () => ({
+        target: util.target,
+        stackFrame: {},
+        stackTimerNeedsInit: () => true,
+        startStackTimer: ms => {
+            duration = ms;
+        },
+        yield: () => {}
+    });
+
+    let localUtil = makeUtil();
+    looks.sayforsecs({MESSAGE: 'x', SECS: Infinity}, localUtil);
+    t.strictEqual(duration, 0);
+
+    duration = -1;
+    localUtil = makeUtil();
+    looks.thinkforsecs({MESSAGE: 'x', SECS: -Infinity}, localUtil);
+    t.strictEqual(duration, 0);
+
+    t.end();
+});
+
+test('looks gobotest hooks emit visibility/costume/backdrop/effect events', t => {
+    const rt = new Runtime();
+    const looks = new Looks(rt);
+
+    const sprite = new Sprite(null, rt);
+    const target = new RenderedTarget(sprite, rt);
+    sprite.costumes = [{name: 'a'}, {name: 'b'}];
+    target.currentCostume = 0;
+    rt.addTarget(target);
+
+    const stageSprite = new Sprite(null, rt);
+    const stage = new RenderedTarget(stageSprite, rt);
+    stage.isStage = true;
+    stageSprite.costumes = [{name: 'bg1'}, {name: 'bg2'}];
+    stage.currentCostume = 0;
+    rt.addTarget(stage);
+
+    const visibilityEvents = [];
+    const costumeEvents = [];
+    const backdropEvents = [];
+    const effectEvents = [];
+
+    rt.on('GOBOTEST_LOOKS_VISIBILITY_CHANGE', e => visibilityEvents.push(e));
+    rt.on('GOBOTEST_LOOKS_COSTUME_CHANGE', e => costumeEvents.push(e));
+    rt.on('GOBOTEST_LOOKS_BACKDROP_CHANGE', e => backdropEvents.push(e));
+    rt.on('GOBOTEST_LOOKS_EFFECT_CHANGE', e => effectEvents.push(e));
+
+    looks.hide({}, {target});
+    looks.show({}, {target});
+    looks.show({}, {target});
+    looks.switchCostume({COSTUME: 'b'}, {target});
+    looks.switchBackdrop({BACKDROP: 'bg2'});
+    looks.setEffect({EFFECT: 'ghost', VALUE: 30}, {target});
+    looks.changeEffect({EFFECT: 'ghost', CHANGE: 10}, {target});
+    looks.setEffect({EFFECT: 'not-real', VALUE: 999}, {target});
+    looks.clearEffects({}, {target});
+
+    t.same(visibilityEvents.map(e => e.visible), [false, true]);
+    t.equal(costumeEvents.length, 1);
+    t.equal(costumeEvents[0].costumeName, 'b');
+    t.equal(backdropEvents.length, 1);
+    t.equal(backdropEvents[0].backdropName, 'bg2');
+    t.same(effectEvents.map(e => e.mode), ['set', 'change', 'clear']);
     t.end();
 });
 

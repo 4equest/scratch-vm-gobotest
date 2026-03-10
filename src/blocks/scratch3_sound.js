@@ -166,8 +166,31 @@ class Scratch3SoundBlocks {
         if (index >= 0) {
             const {target} = util;
             const {sprite} = target;
-            const {soundId} = sprite.sounds[index];
-            if (sprite.soundBank) {
+            const sound = sprite.sounds[index];
+            const {soundId} = sound;
+            const hasSoundBank = Boolean(sprite.soundBank && typeof sprite.soundBank.playSound === 'function');
+            if (this.runtime && typeof this.runtime.emit === 'function') {
+                // Test harness hook: allow headless runners to observe sound playback without requiring an AudioEngine.
+                const shouldEmit = typeof this.runtime.listenerCount !== 'function' ||
+                    this.runtime.listenerCount('GOBOTEST_SOUND_PLAY') > 0;
+                if (shouldEmit) {
+                    this.runtime.emit('GOBOTEST_SOUND_PLAY', {
+                        targetId: target.id,
+                        targetName: typeof target.getName === 'function' ? target.getName() : '',
+                        soundId,
+                        soundName: sound && sound.name ? sound.name : '',
+                        rate: sound && sound.rate !== null && typeof sound.rate !== 'undefined' ?
+                            sound.rate :
+                            null,
+                        sampleCount: sound && sound.sampleCount !== null && typeof sound.sampleCount !== 'undefined' ?
+                            sound.sampleCount :
+                            null,
+                        played: hasSoundBank,
+                        wait: storeWaiting === STORE_WAITING
+                    });
+                }
+            }
+            if (hasSoundBank) {
                 if (storeWaiting === STORE_WAITING) {
                     this._addWaitingSound(target.id, soundId);
                 } else {
@@ -175,6 +198,7 @@ class Scratch3SoundBlocks {
                 }
                 return sprite.soundBank.playSound(target, soundId);
             }
+            if (storeWaiting === STORE_WAITING) return Promise.resolve();
         }
     }
 
@@ -228,6 +252,13 @@ class Scratch3SoundBlocks {
 
     stopAllSounds () {
         if (this.runtime.targets === null) return;
+        if (this.runtime && typeof this.runtime.emit === 'function') {
+            const shouldEmit = typeof this.runtime.listenerCount !== 'function' ||
+                this.runtime.listenerCount('GOBOTEST_SOUND_STOP_ALL') > 0;
+            if (shouldEmit) {
+                this.runtime.emit('GOBOTEST_SOUND_STOP_ALL', {});
+            }
+        }
         const allTargets = this.runtime.targets;
         for (let i = 0; i < allTargets.length; i++) {
             this._stopAllSoundsForTarget(allTargets[i]);

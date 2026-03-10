@@ -1,5 +1,6 @@
 const test = require('tap').test;
 const Sound = require('../../src/blocks/scratch3_sound');
+const EventEmitter = require('events');
 let playedSound;
 
 const blocks = new Sound();
@@ -69,5 +70,42 @@ test('playSound prioritizes sound name if given a string', t => {
     blocks.playSound(args, util);
     // Use the sound named '6', which is the fourth
     t.strictEqual(playedSound, 'fourth soundId');
+    t.end();
+});
+
+test('playSoundAndWait returns a promise when soundBank is unavailable', async t => {
+    const runtime = new EventEmitter();
+    runtime.targets = [];
+    const localBlocks = new Sound(runtime);
+    const localUtil = {
+        target: {
+            id: 'sprite-1',
+            getName: () => 'Sprite1',
+            sprite: {
+                sounds: [{name: 'beep', soundId: 's1', rate: 48000, sampleCount: 4800}]
+            }
+        }
+    };
+    const events = [];
+    runtime.on('GOBOTEST_SOUND_PLAY', evt => events.push(evt));
+    const p = localBlocks.playSoundAndWait({SOUND_MENU: 'beep'}, localUtil);
+    t.type(p, Promise);
+    await p;
+    t.equal(events.length, 1);
+    t.equal(events[0].played, false);
+});
+
+test('PROJECT_STOP_ALL emits GOBOTEST_SOUND_STOP_ALL even without util', t => {
+    const runtime = new EventEmitter();
+    runtime.targets = [];
+    const localBlocks = new Sound(runtime);
+    let stopAllEvents = 0;
+    runtime.on('GOBOTEST_SOUND_STOP_ALL', () => {
+        stopAllEvents++;
+    });
+    runtime.emit('PROJECT_STOP_ALL');
+    t.equal(stopAllEvents, 1);
+    localBlocks.stopAllSounds();
+    t.equal(stopAllEvents, 2);
     t.end();
 });
